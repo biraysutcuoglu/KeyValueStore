@@ -5,7 +5,7 @@
 #include <mutex>
 #include <shared_mutex>
 #include <thread>
-#include <optional>
+#include "persistent_db.hpp"
 
 class FIFOCache {
 private:
@@ -15,30 +15,29 @@ private:
 
     std::unordered_map<std::string, std::string> cache;
     std::queue<std::string> queue;
-    std::unordered_map<std::string, std::string> db;
+    SQLiteDB db;
     
     mutable std::shared_mutex cache_mutex;
-    mutable std::shared_mutex db_mutex;
     
 public:
     FIFOCache() : capacity(INT_MAX) {}
     
     std::pair<std::string, std::string> get(const std::string& key) {
+        // check cache
         {
             std::shared_lock<std::shared_mutex> cache_lock(cache_mutex);
             auto it = cache.find(key);
+            // if in cache
             if (it != cache.end()) {
                 return std::make_pair(it->first, it->second);
             }
         }
-        
+
+        //check DB
         {
-            std::shared_lock<std::shared_mutex> db_lock(db_mutex);
-            auto it = db.find(key);
-            if (it != db.end()) {
-                std::string value = it->second;
-                db_lock.unlock();
-                
+            auto value_opt = db.get_from_db(key);
+            if (value_opt.first) {
+                std::string value = value_opt.second;
                 insertToCache(key, value);
                 return std::make_pair(key, value);
             }
@@ -48,28 +47,15 @@ public:
     }
     
     void put(const std::string& key, const std::string& value) {
-        {
-            std::unique_lock<std::shared_mutex> db_lock(db_mutex);
-            db[key] = value;
-        }
-        
+        // 
+        db.put_to_db(key, value);
         insertToCache(key, value);
     }
     
     // Remove a key-value pair from both cache and DB
     bool remove(const std::string& key) {
-        bool removed_from_db = false;
+        bool removed_from_db = db.remove_from_db(key); // remove from DB
         bool removed_from_cache = false;
-        
-        // Remove from DB first
-        {
-            std::unique_lock<std::shared_mutex> db_lock(db_mutex);
-            auto it = db.find(key);
-            if (it != db.end()) {
-                db.erase(it);
-                removed_from_db = true;
-            }
-        }
         
         // Remove from cache
         {
@@ -80,7 +66,7 @@ public:
                 cache.erase(it);
                 removed_from_cache = true;
                 
-                // Remove from queue - need to rebuild queue without the key
+                // Remove from queue -> rebuild queue without the key
                 std::queue<std::string> new_queue;
                 while (!queue.empty()) {
                     std::string current = queue.front();
@@ -104,7 +90,7 @@ public:
             return; // can not cache 
         }
 
-        // if key exists -> remove from current size 
+        // if key exists
         auto it = cache.find(key);
         if(it != cache.end()){
             current_size -= (it->first.size() + it->second.size()); 
@@ -124,11 +110,6 @@ public:
         }
         cache[key] = value;
         current_size += value_size;
-    }
-    
-    void putToDB(const std::string key, const std::string& value) {
-        std::unique_lock<std::shared_mutex> db_lock(db_mutex);
-        db[key] = value;
     }
 
     void displayCache() {

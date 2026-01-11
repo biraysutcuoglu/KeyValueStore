@@ -11,3 +11,7 @@ add_executable(fifo_cache fifo_cache.cpp)
 # Link pthread for thread support
 find_package(Threads REQUIRED)
 target_link_libraries(fifo_cache PRIVATE Threads::Threads)
+
+# Find and link SQLite3
+find_package(SQLite3 REQUIRED)
+target_link_libraries(fifo_cache PRIVATE SQLite::SQLite3)
