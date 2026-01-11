@@ -14,6 +14,7 @@ private:
     int capacity;
 
     std::unordered_map<std::string, std::string> cache;
+    // no operation to directly access to an index in queue
     std::queue<std::string> queue;
     SQLiteDB db;
     
@@ -47,7 +48,9 @@ public:
     }
     
     void put(const std::string& key, const std::string& value) {
-        // 
+        if(key == ""){
+            return;
+        }
         db.put_to_db(key, value);
         insertToCache(key, value);
     }
@@ -65,17 +68,21 @@ public:
                 current_size -= (it->first.size() + it->second.size()); 
                 cache.erase(it);
                 removed_from_cache = true;
-                
-                // Remove from queue -> rebuild queue without the key
-                std::queue<std::string> new_queue;
-                while (!queue.empty()) {
-                    std::string current = queue.front();
-                    queue.pop();
-                    if (current != key) {
-                        new_queue.push(current);
-                    }
+            }
+            
+            // Rebuild queue without the key 
+            // Extract all elements to a vector first
+            std::vector<std::string> queue_elements;
+            while (!queue.empty()) {
+                queue_elements.push_back(queue.front());
+                queue.pop();
+            }
+            
+            // Rebuild queue excluding the removed key
+            for (const auto& elem : queue_elements) {
+                if (elem != key) {
+                    queue.push(elem);
                 }
-                queue = std::move(new_queue);
             }
         }
         
@@ -100,8 +107,13 @@ public:
         while (current_size + value_size > MAX_SIZE && !queue.empty()) {
             std::string oldest = queue.front();
             queue.pop();
-            current_size -= (oldest.size() + cache[oldest].size());
-            cache.erase(oldest);
+
+            //check if oldest exists (to prevent seg. fault if another thread deletes it)
+            auto oldest_it = cache.find(oldest);
+            if(oldest_it != cache.end()){
+                current_size -= (oldest.size() + cache[oldest].size());
+                cache.erase(oldest);
+            }
         }
         
         // add new entry
@@ -134,47 +146,3 @@ public:
         std::cout << std::endl << std::endl;
     }
 };
-
-int main() {
-    FIFOCache fifo_cache;
-
-    fifo_cache.put("a", std::string(20, 'A')); // 21 bytes
-    fifo_cache.put("b", std::string(20, 'B')); // 21 bytes
-    fifo_cache.displayCache();
-
-    // should force eviction of "a"
-    fifo_cache.put("c", std::string(20, 'C'));
-    fifo_cache.displayCache();
-
-    // validate behavior
-    auto res = fifo_cache.get("a");
-    std::cout << "Get a (should come from DB): " << res.second << std::endl;
-
-    std::cout << "\nAttempting to add value larger than MAX_SIZE (50 bytes)..." << std::endl;
-    std::string huge_value(100, 'X');  // 100 bytes + key
-    fifo_cache.put("huge", huge_value);
-    
-    fifo_cache.displayCache();
-
-    std::cout<< "---- Multithreaded tests ----------" << std::endl;
-    // Multithreaded example
-    std::thread t1([&]() {
-        fifo_cache.put("e", "Image5");
-        std::cout << "Thread 1 added key e" << std::endl;
-    });
-    
-    std::thread t2([&]() {
-        fifo_cache.remove("c");
-        std::cout << "Thread 2 removed key c" << std::endl;
-    });
-    
-    std::thread t3([&]() {
-        std::cout << "Thread 3 access d: " << fifo_cache.get("d").second << std::endl;
-    });
-    
-    t1.join();
-    t2.join();
-    t3.join();
-    
-    return 0;
-}
