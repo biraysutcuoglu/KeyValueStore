@@ -6,7 +6,7 @@
 #include <iomanip>
 #include <algorithm>
 #include <numeric>
-#include "fifo_cache.hpp"
+#include "../fifo_cache.hpp"
 
 class PerformanceTest {
 private:
