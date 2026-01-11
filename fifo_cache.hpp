@@ -14,29 +14,32 @@ private:
     int capacity;
 
     std::unordered_map<std::string, std::string> cache;
-    // no operation to directly access to an index in queue
-    std::queue<std::string> queue;
-    SQLiteDB db;
+    std::queue<std::string> queue; // queue holds the keys in the cache
+    SQLiteDB db; // persistent storage
     
     mutable std::shared_mutex cache_mutex;
     
 public:
-    FIFOCache() : capacity(INT_MAX) {}
+    FIFOCache() : capacity(INT_MAX) {} // cache can hold any number of keys (constrained by MAX_SIZE)
     
+    /// GET method for accessing elements from key-value store
+    /// Checks cache first, then database. Caches database hits
+    /// @returns (key, value) pair if found, ("", "") otherwise
     std::pair<std::string, std::string> get(const std::string& key) {
-        // check cache
+        // Check cache
         {
-            std::shared_lock<std::shared_mutex> cache_lock(cache_mutex);
+            std::shared_lock<std::shared_mutex> cache_lock(cache_mutex); // read lock
             auto it = cache.find(key);
-            // if in cache
+            // cache hit
             if (it != cache.end()) {
                 return std::make_pair(it->first, it->second);
             }
         }
 
-        //check DB
+        // Check DB
         {
             auto value_opt = db.get_from_db(key);
+            // db hit
             if (value_opt.first) {
                 std::string value = value_opt.second;
                 insertToCache(key, value);
@@ -47,6 +50,9 @@ public:
         return {"", ""};
     }
     
+    /// PUT method for inserting and updating values
+    /// Does not allow inserting empty strings as keys (values can be empty)
+    /// Puts every new pair to database first then inserts to cache
     void put(const std::string& key, const std::string& value) {
         if(key == ""){
             return;
@@ -55,14 +61,15 @@ public:
         insertToCache(key, value);
     }
     
-    // Remove a key-value pair from both cache and DB
+    /// DELETE method for removing a key-value pair from cache and DB
+    /// @returns true if remove successful, false otherwise
     bool remove(const std::string& key) {
         bool removed_from_db = db.remove_from_db(key); // remove from DB
         bool removed_from_cache = false;
         
         // Remove from cache
         {
-            std::unique_lock<std::shared_mutex> cache_lock(cache_mutex);
+            std::unique_lock<std::shared_mutex> cache_lock(cache_mutex); // write lock
             auto it = cache.find(key);
             if (it != cache.end()) {
                 current_size -= (it->first.size() + it->second.size()); 
@@ -70,15 +77,14 @@ public:
                 removed_from_cache = true;
             }
             
-            // Rebuild queue without the key 
-            // Extract all elements to a vector first
+            // extract all elements to a vector first
             std::vector<std::string> queue_elements;
             while (!queue.empty()) {
                 queue_elements.push_back(queue.front());
                 queue.pop();
             }
             
-            // Rebuild queue excluding the removed key
+            // rebuild queue excluding the removed key
             for (const auto& elem : queue_elements) {
                 if (elem != key) {
                     queue.push(elem);
@@ -86,11 +92,14 @@ public:
             }
         }
         
-        return removed_from_db || removed_from_cache;
+        return removed_from_db || removed_from_cache; // a record can only be in db (not in cache) or both 
     }
     
+    /// Helper method for GET and PUT
+    /// Inserts new records to cache
+    /// If cache is full evicts oldest element then inserts new
     void insertToCache(const std::string& key, const std::string& value) {
-        std::unique_lock<std::shared_mutex> cache_lock(cache_mutex);
+        std::unique_lock<std::shared_mutex> cache_lock(cache_mutex); //write lock
         
         size_t value_size = key.size() + value.size();
         if(value_size > MAX_SIZE){
@@ -116,7 +125,7 @@ public:
             }
         }
         
-        // add new entry
+        // add new entry to queue and cache
         if (cache.find(key) == cache.end()) {
             queue.push(key);
         }
@@ -129,8 +138,7 @@ public:
         
         std::cout << "--- Cache State ---" << std::endl;
         std::cout << "Capacity: " << capacity << std::endl;
-        std::cout << "Current Size: " << current_size << " bytes (" 
-          << (current_size / 1024.0 / 1024.0) << " MB)" << std::endl;
+        std::cout << "Current Size: " << current_size << " bytes" << std::endl;
         std::cout << "Cache Contents:" << std::endl;
         
         for (const auto& [key, value] : cache) {
@@ -138,7 +146,7 @@ public:
         }
         
         std::cout << "FIFO Queue Order: ";
-        std::queue<std::string> temp_queue = queue;  // Copy to iterate
+        std::queue<std::string> temp_queue = queue;
         while (!temp_queue.empty()) {
             std::cout << temp_queue.front() << " ";
             temp_queue.pop();
