@@ -13,8 +13,8 @@ private:
     const size_t MAX_SIZE = 50; //bytes
     int capacity;
 
-    std::unordered_map<std::string, std::string> cache;
-    std::queue<std::string> queue; // queue holds the keys in the cache
+    std::unordered_map<std::string, std::string> cache; // cache holds the keys and values
+    std::queue<std::string> queue; // fifo queue holds the keys in the cache
     SQLiteDB db; // persistent storage
     
     mutable std::shared_mutex cache_mutex;
@@ -73,8 +73,8 @@ public:
             auto it = cache.find(key);
             if (it != cache.end()) {
                 current_size -= (it->first.size() + it->second.size()); 
-                cache.erase(it);
-                removed_from_cache = true;
+                cache.erase(it); // remove from cache
+                removed_from_cache = true; 
             }
             
             // extract all elements to a vector first
@@ -97,9 +97,9 @@ public:
     
     /// Helper method for GET and PUT
     /// Inserts new records to cache
-    /// If cache is full evicts oldest element then inserts new
+    /// If cache is full, evicts oldest element then inserts new
     void insertToCache(const std::string& key, const std::string& value) {
-        std::unique_lock<std::shared_mutex> cache_lock(cache_mutex); //write lock
+        std::unique_lock<std::shared_mutex> cache_lock(cache_mutex); // write lock
         
         size_t value_size = key.size() + value.size();
         if(value_size > MAX_SIZE){
@@ -117,7 +117,7 @@ public:
             std::string oldest = queue.front();
             queue.pop();
 
-            //check if oldest exists (to prevent seg. fault if another thread deletes it)
+            //check if oldest exists (to prevent seg. fault if another thread deletes it in the meantime)
             auto oldest_it = cache.find(oldest);
             if(oldest_it != cache.end()){
                 current_size -= (oldest.size() + cache[oldest].size());
